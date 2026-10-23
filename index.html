@@ -3314,9 +3314,12 @@ async function initFromLink(){
   return false;
 }
 
-function openLocationPicker(){
+async function openLocationPicker(){
   const modal = document.getElementById('locationPickerModal');
   const body = document.getElementById('locationPickerBody');
+  const required = !(await getDeviceLocation());
+  const closeBtn = document.getElementById('locationPickerCloseBtn');
+  if(closeBtn) closeBtn.style.display = required ? 'none' : '';
   modal.style.display = 'flex';
 
   body.innerHTML = PRESET_LOCATIONS.map(loc=>
@@ -3330,10 +3333,10 @@ function openLocationPicker(){
       registerDevice();
       modal.style.display = 'none';
       showToast(`Location set: ${btn.dataset.name}`);
+      scheduleNightlySync(); // setup is complete — the due-check may now run
     };
   });
 
-  const closeBtn = document.getElementById('locationPickerCloseBtn');
   if(closeBtn) closeBtn.onclick = (e)=>{ e.preventDefault(); modal.style.display='none'; };
 }
 
@@ -3515,6 +3518,8 @@ function showUserProfileModal(){
     document.getElementById('profileRoleInput').value   = p.role       || 'Staff';
     document.getElementById('profileDeviceInput').value = p.deviceNick || '';
   }
+  // First use: the profile is mandatory, so there is nothing to cancel back to.
+  document.getElementById('profileCancelBtn').style.display = p ? '' : 'none';
   modal.style.display = 'flex';
   setTimeout(()=> document.getElementById('profileNameInput').focus(), 50);
 }
@@ -3537,12 +3542,21 @@ document.getElementById('profileSaveBtn').onclick = async ()=>{
   hideUserProfileModal();
   await registerDevice();
   showToast('Profile saved');
+  ensureDeviceSetup(); // first use: continue straight to the location step
 };
 
 document.getElementById('profileCancelBtn').onclick = hideUserProfileModal;
 document.getElementById('userProfileModal').onclick = e=>{
-  if(e.target === document.getElementById('userProfileModal')) hideUserProfileModal();
+  if(e.target === document.getElementById('userProfileModal') && getUserProfile()) hideUserProfileModal();
 };
+
+/* First-use setup: every device must have a name and a location, saved on
+   the device. Name first, then location; neither prompt can be dismissed
+   until it is filled in. A location already set by a QR code is kept. */
+async function ensureDeviceSetup(){
+  if(!getUserProfile()){ showUserProfileModal(); return; }
+  if(!(await getDeviceLocation())) openLocationPicker();
+}
 
 /* ============================================================
    NIGHTLY SYNC SCHEDULER — pushes data at 3:00am local time
@@ -3610,6 +3624,7 @@ async function runNightlyIfDue(){
   if(_nightlySyncInFlight) return;
   _nightlySyncInFlight = true;
   try{
+    if(!getUserProfile() || !(await getDeviceLocation())) return; // first-use setup not finished
     const prev = await storeGet(NIGHTLY_LAST_SENT_KEY);
     const tonight = lastReportBoundaryKey();
     if(prev === tonight) return;
@@ -4558,19 +4573,11 @@ switchTab('pre');
 
 /* Render user pill and prompt for profile if first launch */
 renderUserPill();
-if(!getUserProfile()){
-  setTimeout(()=> showUserProfileModal(), 800);
-}
-
 renderLocationPill();
 applyAdminVisibility();
 hydrateManagerScope().then(()=>{
-  initFromLink().then(setFromLink=>{
-    if(setFromLink) return;
-    getDeviceLocation().then(loc=>{
-      if(!loc) setTimeout(()=> openLocationPicker(), 1600);
-    });
-  });
+  // A QR/manager link may set the location first; then require whatever is still missing.
+  initFromLink().then(()=> setTimeout(ensureDeviceSetup, 800));
 });
 
 /* Always connected — baked-in credentials auto-start everything */
