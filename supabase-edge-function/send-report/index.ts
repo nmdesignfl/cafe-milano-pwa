@@ -29,6 +29,9 @@ function parseFromEmail(raw: string): { email: string; name?: string } {
   return { email: raw.trim() };
 }
 
+const esc = (v: string) =>
+  v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS });
@@ -44,6 +47,8 @@ serve(async (req) => {
       dateStr,
       filename,
       fileBase64,
+      heading,
+      description,
     } = await req.json();
 
     if (!to || !fileBase64) {
@@ -81,7 +86,7 @@ serve(async (req) => {
         </div>
         <div style="padding:24px;background:#fff;">
           <h2 style="margin:0 0 6px;font-size:18px;color:#0A0A0A;">
-            Nightly Checklist Report
+            ${esc(String(heading ?? "Nightly Checklist Report"))}
           </h2>
           <p style="margin:0 0 18px;color:#555;font-size:14px;">${dateStr ?? ""}</p>
           <table style="width:100%;border-collapse:collapse;font-size:14px;">
@@ -101,9 +106,12 @@ serve(async (req) => {
     }
           </table>
           <p style="margin:20px 0 0;font-size:14px;color:#333;">
-            The attached Excel workbook contains one sheet per section:
-            Pre-Service, Post-Service, Manager Closing, General Cleaning,
-            Kitchen Weekly, and Weekly Inventory.
+            ${
+      esc(String(
+        description ??
+          "The attached Excel workbook contains one sheet per section: Pre-Service, Post-Service, Manager Closing, General Cleaning, Kitchen Weekly, and Weekly Inventory.",
+      ))
+    }
           </p>
         </div>
         <div style="background:#EFF6FF;padding:14px;text-align:center;font-size:12px;color:#555;">
