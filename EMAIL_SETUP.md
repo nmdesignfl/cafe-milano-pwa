@@ -82,18 +82,22 @@ tables.
 ## Step 5 — Set up locations and their recipient emails
 
 This app supports four locations sharing one deployment — Jarry, Laval,
-West Island, and Brossard. Each has its own recipient email, set centrally
-by the master Admin — picking a location on a staff phone never needs a
-passcode.
+West Island, and Brossard. Each has its own recipient email. Picking a
+location on a phone never needs a passcode.
 
-1. In **⚙ Admin → Data / SQL**, under **Locations, recipient emails & staff
-   QR codes**, enter and save the report email for each location.
-2. Tap **QR code** next to a location to generate a QR code for it, then
-   send that image to the location's manager (text, print, AirDrop —
-   however is easiest).
-3. Staff scan the QR code with their phone's camera, which opens the app
-   with that location already set — they never see a location picker at
-   all.
+1. Open **⚙ Admin → 📍 Locations**. For each location, enter and save the
+   report email.
+2. Hand each location off with one of two QR codes:
+   - **Manager QR** — for the location's manager. Scanning it once opens the
+     app already set to that location, with Admin showing only the
+     **📍 Locations** tab for that location. The manager can set their own
+     report email and generate their own Staff QR.
+   - **Staff QR** — for employees. Scanning it opens the app already set to
+     that location, with Admin hidden entirely. Staff never see a location
+     picker.
+3. Under each QR code, tap **Send link…** (opens the phone's share sheet) or
+   **Copy link** to pass it along by text or email instead of showing or
+   printing the image.
 4. A phone can also pick its location manually by tapping the **📍
    location pill** in the header, if a QR code isn't handy.
 
