@@ -3587,6 +3587,13 @@ async function runNightlySend(){
     if(sent){
       await storeSet(NIGHTLY_LAST_SENT_KEY, lastReportBoundaryKey());
       if(logEl) logEl.innerHTML = `[${ts}] ✓ Nightly report emailed<br>` + (logEl.innerHTML||'');
+      // Separate training report, only if training has been used. A failure
+      // here must not undo the main report's "sent" marker.
+      try{ await sendTrainingReport(logEl, false); }
+      catch(e){
+        console.warn('Training report failed:', e.message);
+        if(logEl) logEl.innerHTML = `[${ts}] ✗ Training report failed: ${escapeHtml(e.message)}<br>` + (logEl.innerHTML||'');
+      }
     }
   } catch(e){
     console.warn('Nightly report failed:', e.message);
@@ -4119,6 +4126,95 @@ async function buildExcelReport(){
   return bufferToBase64(await wb.xlsx.writeBuffer());
 }
 
+/* ---- Training report: separate workbook, sent only when training is in use ----
+   "In use" = a new hire name is entered, any task is ticked, or any sign-off
+   field is filled. After a send, it is only re-sent when the training data
+   has changed, so a finished hire doesn't generate a nightly email forever. */
+const TRAINING_LAST_SENT_KEY = 'device:lastTrainingSent';
+
+function isTrainingUsed(state){
+  const hasSignoff = Object.values(state.signoff || {}).some(o => Object.values(o || {}).some(v => String(v).trim()));
+  return !!((state.hire && String(state.hire.name || '').trim()) || Object.keys(state.checks || {}).length || hasSignoff);
+}
+
+async function buildTrainingReport(state){
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  const profile = getUserProfile();
+  const hire = state.hire || {};
+  const meta = [
+    ['Generated', new Date().toLocaleString()],
+    ['Device user', profile ? `${profile.name} (${profile.role})` : 'Unknown'],
+    ['New hire', hire.name || '(not entered)'],
+    ['Start date', hire.start || '']
+  ];
+
+  const rows = [];
+  TRAINING_DATA.forEach(shift=>{
+    shift.sections.forEach((sec, si)=>{
+      sec.items.forEach((text, ti)=>{
+        const e = state.checks[trTaskKey(shift.id, si, ti)];
+        const done = !!(e && e.by);
+        rows.push([shift.label, sec.title, text, done ? e.by : 'Not completed',
+                   done ? new Date(e.at).toLocaleString() : '']);
+      });
+    });
+  });
+  addReportSheet(wb, 'Training', meta, ['Shift','Section','Task','Trainer initials','Completed at'],
+                 rows, [14, 28, 60, 16, 22], ['center','left','wrap','center','center']);
+
+  const soRows = TRAINING_DATA.map(shift=>{
+    const so = (state.signoff || {})[shift.id] || {};
+    return [shift.label, so.trainer || 'Not signed off', so.date || '', so.notes || ''];
+  });
+  addReportSheet(wb, 'Sign-offs', meta, ['Shift','Trainer','Date completed','Notes'],
+                 soRows, [14, 26, 16, 60], ['center','left','center','wrap']);
+
+  return bufferToBase64(await wb.xlsx.writeBuffer());
+}
+
+/* Returns true if a training report was emailed. */
+async function sendTrainingReport(logEl, force){
+  const log = m=>{ if(logEl){ logEl.innerHTML = m+'<br>'+(logEl.innerHTML||''); } };
+  const state = await loadTrainingState();
+  if(!isTrainingUsed(state)) return false;
+  const sig = JSON.stringify(state);
+  if(!force && (await storeGet(TRAINING_LAST_SENT_KEY)) === sig) return false; // nothing new since last send
+
+  const to = await getReportEmail();
+  if(!to) return false; // the main report already warns about a missing address
+
+  log('Building training report…');
+  const b64 = await buildTrainingReport(state);
+  const profile = getUserProfile();
+  const dateStr = todayStr();
+  const hireName = (state.hire && state.hire.name || '').trim();
+  const {url, key} = getSupaConfig();
+  const res = await fetch(`${url}/functions/v1/send-report`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
+    body: JSON.stringify({
+      to,
+      subject: `Café Milano — Training Report${hireName ? ' — ' + hireName : ''} ${dateStr}`,
+      heading: 'New Hire Training Report',
+      description: `The attached Excel workbook lists every training task for each shift with the trainer initials, plus the trainer sign-offs${hireName ? ' for ' + hireName : ''}.`,
+      deviceUser: profile?.name || 'Unknown',
+      deviceRole: profile?.role || '',
+      deviceNick: profile?.deviceNick || '',
+      dateStr,
+      filename: `CafeMilano_Training_${hireName ? hireName.replace(/[^\w]+/g,'') + '_' : ''}${dateStr}.xlsx`,
+      fileBase64: b64
+    })
+  });
+  if(!res.ok){
+    const t = await res.text();
+    throw new Error(`Training email send failed (${res.status}): ${t}`);
+  }
+  await storeSet(TRAINING_LAST_SENT_KEY, sig);
+  log('✓ Training report emailed');
+  return true;
+}
+
 /* Get the admin-configured report email (stored in overrides so it syncs) */
 /* Report email is per-location; falls back to the legacy global
    override for a device that hasn't picked a location yet. */
@@ -4312,7 +4408,10 @@ async function renderDataTab(){
     logEl.innerHTML = '';
     try{
       const ok = await sendNightlyReport(logEl);
-      if(ok) showToast('Report emailed');
+      if(ok){
+        const tr = await sendTrainingReport(logEl, true);
+        showToast(tr ? 'Report and training report emailed' : 'Report emailed');
+      }
     }
     catch(e){ logEl.innerHTML = `<span style="color:var(--rust)">Error: ${escapeHtml(e.message)}</span><br>` + logEl.innerHTML; }
   };
