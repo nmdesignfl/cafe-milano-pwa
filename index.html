@@ -367,6 +367,10 @@
   .tr-signoff-grid input{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font-family:'Archivo',sans-serif;font-size:13px;background:#fff;}
   .tr-signoff-grid input:focus{outline:2px solid var(--rust);outline-offset:1px;}
 
+  .tr-hire{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:18px;padding:14px;border:1px solid var(--line);border-radius:10px;}
+  @media(max-width:540px){.tr-hire{grid-template-columns:1fr;}}
+  .tr-hire label{display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-soft);margin-bottom:5px;}
+  .tr-hire input{width:100%;box-sizing:border-box;padding:9px 10px;font:inherit;font-size:15px;}
   .training-actions{margin-top:20px;display:flex;justify-content:flex-end;}
 
   /* ---------- Admin section ---------- */
@@ -775,6 +779,10 @@
       <span class="meta" id="trainingOverallLabel"></span>
     </div>
     <p class="section-sub">Three training shifts — from shadowing on Shift 1 to independent work by Shift 3. All tasks require trainer initials; each shift ends with a sign-off.</p>
+    <div class="tr-hire" id="trainingHire">
+      <div><label for="trHireName">New hire name</label><input type="text" id="trHireName" placeholder="Full name" maxlength="60"></div>
+      <div><label for="trHireStart">Start date</label><input type="date" id="trHireStart"></div>
+    </div>
     <div class="training-shift-tabs" id="trainingShiftTabs"></div>
     <div id="trainingShiftBody"></div>
     <div class="training-actions">
@@ -1841,7 +1849,7 @@ const TR_STORAGE_KEY = 'training';
 let trActiveShift = 'shift1';
 
 async function loadTrainingState(){
-  return (await storeGet(TR_STORAGE_KEY)) || {checks:{}, signoff:{}};
+  return (await storeGet(TR_STORAGE_KEY)) || {checks:{}, signoff:{}, hire:{}};
 }
 async function saveTrainingState(state){
   await storeSet(TR_STORAGE_KEY, state);
@@ -1874,6 +1882,13 @@ async function renderTraining(){
   const state = await loadTrainingState();
   const {total, done} = trCountAll(state);
   const pct = total ? Math.round(done/total*100) : 0;
+
+  // new hire name / start date (only overwrite inputs when not being edited)
+  const hireName = document.getElementById('trHireName');
+  const hireStart = document.getElementById('trHireStart');
+  const hire = state.hire || {};
+  if(document.activeElement !== hireName) hireName.value = hire.name || '';
+  if(document.activeElement !== hireStart) hireStart.value = hire.start || '';
 
   // overall label in section-head
   document.getElementById('trainingOverallLabel').textContent =
@@ -2030,9 +2045,18 @@ async function renderTraining(){
   body.appendChild(soEl);
 }
 
+['trHireName','trHireStart'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', async e=>{
+    const fresh = await loadTrainingState();
+    fresh.hire = fresh.hire || {};
+    fresh.hire[id === 'trHireName' ? 'name' : 'start'] = e.target.value;
+    await saveTrainingState(fresh);
+  });
+});
+
 document.getElementById('trainingResetBtn').addEventListener('click', async ()=>{
-  if(!confirm('Reset all training progress and sign-offs on this device?')) return;
-  await saveTrainingState({checks:{}, signoff:{}});
+  if(!confirm('Reset all training progress, sign-offs and the new hire name on this device?')) return;
+  await saveTrainingState({checks:{}, signoff:{}, hire:{}});
   renderTraining();
   showToast('Training progress reset');
 });
