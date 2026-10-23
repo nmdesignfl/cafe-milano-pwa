@@ -3578,14 +3578,14 @@ function fmtCountdown(ms){
 }
 
 async function runNightlySend(){
+  let sent = false;
   const logEl = document.getElementById('syncLog');
   const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   try{
     await registerDevice();
     await pullAndApplyOverrides();  // get latest admin changes
-    const sent = await sendNightlyReport(logEl); // email the Excel report
+    sent = await sendNightlyReport(logEl); // email the Excel report
     if(sent){
-      await storeSet(NIGHTLY_LAST_SENT_KEY, lastReportBoundaryKey());
       if(logEl) logEl.innerHTML = `[${ts}] ✓ Nightly report emailed<br>` + (logEl.innerHTML||'');
       // Separate training report, only if training has been used. A failure
       // here must not undo the main report's "sent" marker.
@@ -3599,25 +3599,34 @@ async function runNightlySend(){
     console.warn('Nightly report failed:', e.message);
     if(logEl) logEl.innerHTML = `[${ts}] ✗ Nightly report failed: ${e.message}<br>` + (logEl.innerHTML||'');
   }
+  return sent;
+}
+
+/* The only path to an automatic send (timer, app reopened, tab foregrounded).
+   Claims tonight's slot BEFORE the slow build/email work so two triggers
+   firing together can't both send, and releases the claim if the send
+   fails so it retries on the next trigger. */
+async function runNightlyIfDue(){
+  if(_nightlySyncInFlight) return;
+  _nightlySyncInFlight = true;
+  try{
+    const prev = await storeGet(NIGHTLY_LAST_SENT_KEY);
+    const tonight = lastReportBoundaryKey();
+    if(prev === tonight) return;
+    await storeSet(NIGHTLY_LAST_SENT_KEY, tonight);
+    if(!(await runNightlySend())) await storeSet(NIGHTLY_LAST_SENT_KEY, prev || '');
+  } finally {
+    _nightlySyncInFlight = false;
+  }
 }
 
 async function scheduleNightlySync(){
   clearTimeout(_nightlySyncTimer);
 
   // Catch-up: if the most recent 3am boundary was missed (app wasn't open
-  // at the time), send now instead of waiting for the next one. Guarded
-  // against overlap since this now also runs on every tab-foreground.
-  if(!_nightlySyncInFlight){
-    _nightlySyncInFlight = true;
-    try{
-      const lastSent = await storeGet(NIGHTLY_LAST_SENT_KEY);
-      if(lastSent !== lastReportBoundaryKey()){
-        await runNightlySend();
-      }
-    } finally {
-      _nightlySyncInFlight = false;
-    }
-  }
+  // at the time), send now instead of waiting for the next one. This also
+  // runs on every tab-foreground; runNightlyIfDue guards against overlap.
+  await runNightlyIfDue();
 
   const ms = msUntil3am();
 
@@ -3631,8 +3640,7 @@ async function scheduleNightlySync(){
   _nightlySyncLabelInterval = setInterval(tickLabel, 60000);
 
   _nightlySyncTimer = setTimeout(async ()=>{
-    await runNightlySend();
-    scheduleNightlySync();
+    scheduleNightlySync(); // runs the due-check, then re-arms the timer
   }, ms);
 }
 
