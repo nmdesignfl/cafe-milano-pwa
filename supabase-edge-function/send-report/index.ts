@@ -1,14 +1,15 @@
 // Supabase Edge Function: send-report
-// Receives an Excel workbook (base64) from the app and emails it via SendGrid.
+// Receives an Excel workbook (base64) from the app and emails it via Brevo
+// (preferred, free tier) or SendGrid (fallback).
 //
-// SendGrid needs only a single verified sender email (Settings > Sender
-// Authentication > Verify a Single Sender) — no domain/DNS access required,
-// unlike Resend which requires a fully verified domain before it will send
-// to arbitrary recipients.
+// Both only need a single verified sender email — no domain/DNS access
+// required, unlike Resend which requires a fully verified domain before it
+// will send to arbitrary recipients. Brevo is used when BREVO_API_KEY is
+// set; otherwise SENDGRID_API_KEY is used.
 //
 // Deploy:
 //   supabase functions deploy send-report --no-verify-jwt
-//   supabase secrets set SENDGRID_API_KEY=SG.xxxxxxxxxx
+//   supabase secrets set BREVO_API_KEY=xkeysib-xxxxxxxxxx   (or SENDGRID_API_KEY=SG.xxxxxxxxxx)
 //   supabase secrets set FROM_EMAIL="Cafe Milano <you@yourdomain.com>"
 
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
@@ -58,12 +59,13 @@ serve(async (req) => {
       );
     }
 
+    const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY");
     const SENDGRID_API_KEY = Deno.env.get("SENDGRID_API_KEY");
     const FROM_EMAIL_RAW = Deno.env.get("FROM_EMAIL") ?? "";
 
-    if (!SENDGRID_API_KEY) {
+    if (!BREVO_API_KEY && !SENDGRID_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "SENDGRID_API_KEY not configured" }),
+        JSON.stringify({ error: "BREVO_API_KEY (or SENDGRID_API_KEY) not configured" }),
         { status: 500, headers: { ...CORS, "Content-Type": "application/json" } },
       );
     }
@@ -119,34 +121,53 @@ serve(async (req) => {
         </div>
       </div>`;
 
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${SENDGRID_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        personalizations: [{ to: [{ email: to }] }],
-        from,
-        subject: subject ?? `Cafe Milano Report ${dateStr ?? ""}`,
-        content: [{ type: "text/html", value: html }],
-        attachments: [
-          {
-            content: fileBase64,
-            filename: filename ?? "report.xlsx",
-            type:
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            disposition: "attachment",
-          },
-        ],
-      }),
-    });
+    const mailSubject = subject ?? `Cafe Milano Report ${dateStr ?? ""}`;
+    const attachmentName = filename ?? "report.xlsx";
 
-    // SendGrid returns 202 with an empty body on success.
+    // Brevo answers 201 with a messageId; SendGrid answers 202 with an empty body.
+    const res = BREVO_API_KEY
+      ? await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          sender: from.name ? { email: from.email, name: from.name } : { email: from.email },
+          to: [{ email: to }],
+          subject: mailSubject,
+          htmlContent: html,
+          attachment: [{ content: fileBase64, name: attachmentName }],
+        }),
+      })
+      : await fetch("https://api.sendgrid.com/v3/mail/send", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${SENDGRID_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: to }] }],
+          from,
+          subject: mailSubject,
+          content: [{ type: "text/html", value: html }],
+          attachments: [
+            {
+              content: fileBase64,
+              filename: attachmentName,
+              type:
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              disposition: "attachment",
+            },
+          ],
+        }),
+      });
+
     if (!res.ok) {
       const body = await res.text();
       return new Response(
-        JSON.stringify({ error: "SendGrid failed", detail: body }),
+        JSON.stringify({ error: `${BREVO_API_KEY ? "Brevo" : "SendGrid"} failed`, detail: body }),
         { status: 502, headers: { ...CORS, "Content-Type": "application/json" } },
       );
     }

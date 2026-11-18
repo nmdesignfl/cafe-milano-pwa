@@ -23,21 +23,35 @@ that was missed, not just what got done.
 
 ---
 
-## Step 1 — Get a SendGrid API key and verify a sender (5 min)
+## Step 1 — Get an email API key and verify a sender (5 min)
 
-SendGrid only requires verifying a single **email address** you own — no
-domain or DNS access needed, unlike most providers which require a fully
-verified sending domain before they'll deliver to arbitrary recipients.
+Either provider below only requires verifying a single **email address** you
+own — no domain or DNS access needed, unlike most providers which require a
+fully verified sending domain before they'll deliver to arbitrary recipients.
 
-1. Go to https://sendgrid.com and sign up (free tier: 100 emails/day)
+**Option A — Brevo (recommended, free: about 300 emails/day, no trial expiry)**
+
+1. Go to https://www.brevo.com and sign up (new accounts may be reviewed
+   before sending is enabled)
+2. Dashboard → **Senders, domains & dedicated IPs → Senders → Add a sender**,
+   enter an address you can receive mail at, and confirm the verification
+   email Brevo sends you
+3. Dashboard → **SMTP & API → API Keys → Generate a new API key** → copy it
+   (starts with `xkeysib-`)
+4. If Brevo shows **Authorized IPs** under Security, make sure IP
+   restriction is deactivated, otherwise Supabase's servers are blocked
+
+**Option B — SendGrid** (the free plan is a time-limited trial, so sending
+stops with "Maximum credits exceeded" once it ends)
+
+1. Go to https://sendgrid.com and sign up
 2. Dashboard → **Settings → Sender Authentication → Verify a Single Sender**
-3. Fill in the form with an email address you can receive mail at (e.g.
-   your own Gmail) and confirm the verification email SendGrid sends you
-4. Dashboard → **Settings → API Keys → Create API Key** (Full Access is
-   fine) → copy the key (starts with `SG.`)
+3. Confirm the verification email, then **Settings → API Keys → Create API
+   Key** and copy the key (starts with `SG.`)
 
 That verified address is your `FROM_EMAIL` below — reports will be sent
-**from** it, but can go **to** any recipient once it's verified.
+**from** it, but can go **to** any recipient once it's verified. If both keys
+are set, Brevo is used.
 
 ## Step 2 — Install the Supabase CLI (2 min)
 
@@ -58,11 +72,11 @@ supabase functions deploy send-report --no-verify-jwt
 Then set your secrets:
 
 ```bash
-supabase secrets set SENDGRID_API_KEY=SG.your_key_here
+supabase secrets set BREVO_API_KEY=xkeysib-your_key_here   # or SENDGRID_API_KEY=SG.your_key_here
 supabase secrets set FROM_EMAIL="Cafe Milano <you@yourdomain-or-gmail.com>"
 ```
 
-`FROM_EMAIL` must exactly match the address you verified in Step 1.
+`FROM_EMAIL` must exactly match the sender address you verified in Step 1.
 
 > Deploying without the CLI: in the Supabase dashboard go to
 > **Edge Functions → Deploy a new function**, name it `send-report`,
